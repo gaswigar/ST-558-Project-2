@@ -1,0 +1,324 @@
+---
+title: "Project 2"
+author: "Grant Swigart"
+date: "6/22/2020"
+output: html_document
+params: 
+  
+  
+---
+The goal is to create models for predicting the shares variable from the dataset. You will create two models: a
+linear regression model and a non-linear model (each of your choice). You will use the parameter functionality
+of markdown to automatically generate an analysis report for each weekday_is_* variable (so you’ll end up
+with seven total outputted documents).
+
+#Setup
+
+##Importing
+
+```{r setup, include=FALSE,warning=FALSE, message=FALSE}
+library(tidyverse)
+library(caret)
+library(rmarkdown)
+library(pROC)
+library(GGally)
+
+news<-read_csv("C:/Users/gswigart/Documents/NCSU/ST 558/Project 2/ST-558-Project-2/Data/OnlineNewsPopularity.csv") 
+```
+Data
+You should briefly describe the data and the variables you have to work with (no need to discuss all of them,
+just the ones you want to use).
+You should randomly sample from (say using sample()) the (Monday) data in order to form a training (70%
+of the data) and test set (30% of the data). You should set the seed to make your work reproducible.
+
+
+## Partitioning into Test and Training. 
+
+```{r}
+news_day <-news %>%
+  filter(weekday_is_monday==1) %>%
+  mutate(share_binary=as.factor(ifelse(shares<1400,0,1))) %>%
+  select(-starts_with('weekday_is'),
+         -is_weekend,
+         -url,
+         -timedelta)
+  
+
+index_train<-unlist(createDataPartition(news_day$share_binary,p=.7))
+training<-news_day[index_train,]
+testing<-news_day[-index_train,]
+```
+
+# Summarizations
+You should produce some basic (but meaningful) summary statistics about the training data you are working
+with. The general things that the plots describe should be explained but, since we are going to automate
+things, there is no need to try and explain particular trends in the plots you see (unless you want to try and
+automate that too!)
+
+Lets group these vairables into some useful groups that we can analyze!
+
+```{r}
+ggplot(data=training,aes(x=shares)) +
+  geom_histogram()
+
+
+#this was taken from the following stack overflow post 
+#https://stackoverflow.com/questions/30858337/how-to-customize-lines-in-ggpairs-ggally
+lowerFn <- function(data, mapping, method = "lm", ...) {
+  p <- ggplot(data = data, mapping = mapping) +
+    geom_point()+
+    geom_smooth(method="loess",color = "red", ...)+
+    geom_smooth(method='lm', color = "blue", ...)
+  p
+}
+
+
+summary(training$shares)
+quantile(training$shares,.97)
+quantile(training$shares,.98)
+quantile(training$shares,.)
+quantile(training$shares,.97)
+quantile(training$shares,.98)
+quantile(training$shares,.99)
+
+iqr<-IQR(training$shares)
+lower<- quantile(training$shares,.25)-1.5*iqr
+upper<- quantile(training$shares,.75)+1.5*iqr
+
+training_out_rem<-training %>%
+  filter(shares>lower & shares<upper )
+
+
+
+#Metrics about title
+
+
+training_out_rem %>%
+  select("n_tokens_title",
+         "title_sentiment_polarity",
+         "abs_title_sentiment_polarity",
+         'shares') %>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+
+training_out_rem %>%
+  select("n_tokens_title",
+         "title_subjectivity",
+         "abs_title_subjectivity",
+         'shares') %>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+  #Looks like we shouldnt use both the title entiment p in the same   plot. Both are piecewise multicolinear and this would lead to incorrect estimates of the parameter standard error. We therefore remove 
+  
+
+#Number of words/nonstop words 
+# Many of these predictors are heavily correlates. We can remove some of these for our regression. 
+training_out_rem %>%
+  select("n_tokens_content",        
+         "n_unique_tokens",            
+         "n_non_stop_words",              
+         "n_non_stop_unique_tokens",
+         "average_token_length",     
+         "num_keywords",
+         'shares') %>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+
+#Number of links, pictures, and images.
+training_out_rem %>%
+  select("num_hrefs",                 
+         "num_self_hrefs",
+         "num_imgs",
+         "num_videos",
+         'shares')%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+#Topic based binary Vairable
+
+
+training_out_rem %>%
+  select("data_channel_is_lifestyle", 
+         "data_channel_is_entertainment",
+         "data_channel_is_bus",
+         "data_channel_is_socmed",
+         "data_channel_is_tech",       
+         "data_channel_is_world",
+         'shares')%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+#Keyword share information
+training_out_rem %>%
+  select("kw_min_min",             
+         "kw_min_avg",
+         "kw_min_max",
+         'shares')%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+training_out_rem %>%
+  select("kw_max_min",
+         "kw_max_max",           
+         "kw_max_avg",
+         'shares')%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+training_out_rem %>%
+  select("kw_avg_min",
+         "kw_avg_avg",          
+         "kw_avg_max",
+         'shares')%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+#minimum shares of referenced articles in mashable. 
+training_out_rem %>%
+  select("self_reference_min_shares",   
+         "self_reference_max_shares",    
+         "self_reference_avg_sharess",
+         'shares')%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+
+
+#LDA variables
+training_out_rem %>%
+  select("LDA_00",
+         "LDA_01",                        
+         "LDA_02",                        
+         "LDA_03",                    
+         "LDA_04",
+         'shares')%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+
+#Sentiment Analysis
+training_out_rem %>%
+  select("global_subjectivity",
+         "global_sentiment_polarity",    
+         "global_rate_positive_words",    
+         "global_rate_negative_words")%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+
+training_out_rem %>%
+  select("rate_positive_words"  ,        
+         "rate_negative_words" ,
+         'shares')%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+training_out_rem %>%
+  select("avg_positive_polarity",     
+         "min_positive_polarity",
+         "max_positive_polarity",        
+         "avg_negative_polarity",        
+         "min_negative_polarity",       
+         "max_negative_polarity",)%>%
+  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+
+
+
+
+```
+
+#Modeling
+Once you have your training data set, we are ready to fit some models.
+You should fit two types of models to predict the shares. One model should be an ensemble model (bagged
+trees, random forests, or boosted trees) and one should be a linear regression model (or collection of them that you’ll choose from).
+
+## Boosted Tree Model 
+
+I want use a boosted tree model. To accomplish this task I want to try many different types of parameters. I try every combination of the below model parameters. I also use three times repeated 10 fold cross validation so that I have more reliable estimates of the model accuracy.
+
+```{r}
+
+train.control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              repeats = 3)
+
+n.trees<-c(200,250)
+interaction.depth<-c(3,4)
+shrinkage<-c(.05)
+n.minobsinnode<-c(8,10)
+param_grid<-data.frame(crossing(n.trees,interaction.depth,shrinkage,n.minobsinnode))
+
+boost_fit = train(share_binary ~ ., 
+                  data=training, 
+                  method="gbm", 
+                  trControl=train.control,
+                  distribution="bernoulli",
+                  tuneGrid=param_grid)
+
+print(boost_fit)
+boost_pred <- predict(boost_fit,newdata = dplyr::select(testing, -share_binary))
+conf_rf<-confusionMatrix(boost_pred,testing$share_binary)
+print(conf_rf)
+```
+
+## Regression Model 
+
+```{r}
+glmFit <- glm(share_binary ~ ., data = training, family = "binomial")
+summary(glmFit)
+```
+
+It looks like the LDA is not linearly independent from each other. Lets remove LDA_04 and continue. 
+
+
+```{r}
+#We fit a logistic regression model 
+glmFit <- glm(share_binary ~ . -LDA_04-shares, data = training, family = "binomial") 
+
+library(MASS)
+step.model <- glmFit %>% stepAIC(trace = FALSE)
+coef(step.model)
+
+
+
+
+cooksd <- cooks.distance(glmFit)
+plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")
+
+
+
+
+
+
+
+
+summary(glmFit)
+
+
+glm_pred <- predict(step.model,newdata = dplyr::select(testing, -share_binary),type = "response")
+
+roc_obj <- roc(testing$share_binary, glm_pred)
+plot(roc_obj)
+thresh<-coords(roc_obj, "best", "threshold")
+
+confusionMatrix(data = as.factor(as.numeric(glm_pred>thresh$threshold)), reference = testing$share_binary)
+
+
+
+```
+
+
+The article referenced in the UCI website mentions that they made the problem into a binary classification
+problem by dividing the shares into two groups (< 1400 and ≥ 1400), you can do this if you’d like or simply
+try to predict the shares themselves. Feel free to use code similar to the notes or use the caret package.
+
+After training/tuning your two types of models (linear and non-linear) using cross-validation, AIC, or your
+preferred method (all on the training data set only!) you should then compare them on the test set. Your
+methodology for choosing your model during the training phase should be explained.
+
+```{r}
+
+```
+
+
+Automation
+Once you’ve completed the above for Monday, adapt the code so that you can use a parameter in your build
+process that will cycle through the weekday_is_* variables.
+
+```{r}
+
+```
+
+
