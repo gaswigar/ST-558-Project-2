@@ -2,84 +2,96 @@
 title: "Project 2"
 author: "Grant Swigart"
 date: "6/22/2020"
-output: html_document
-params: 
-  
-  
+output: 
+  html_document:
+    toc: TRUE
+
 ---
-The goal is to create models for predicting the shares variable from the dataset. You will create two models: a
-linear regression model and a non-linear model (each of your choice). You will use the parameter functionality
-of markdown to automatically generate an analysis report for each weekday_is_* variable (so you’ll end up
-with seven total outputted documents).
+  
+```{r Automating Report,eval = FALSE, echo = FALSE, message = FALSE}
+#This code just automates the report and is run to generate the individual files
+library(rmarkdown)
+#List of weekdays 
+weekday<-c("monday","tuesday","wednesday","thursday","friday","saturday","sunday")
+#create filenames
+output_file <- paste0(weekday, ".html")
+#create a list for each team with just the team name parameter
+params = lapply(weekday, FUN = function(x){list(day = x)})
+#put into a data frame 
+reports <- tibble(output_file, params)
+## #need to use x[[1]] to get at elements since tibble doesn't simplify
+apply(reports, MARGIN = 1,
+      FUN = function(x){
+        render(input = 'C:/Users/gswigart/Documents/NCSU/ST 558/Project 2/ST-558-Project-2/README.rmd', 
+               output_file = x[[1]], 
+               params = x[[2]])
+      })
 
-#Setup
 
-##Importing
+```
+
+# Setup
+
+## Importing
+
+We import the following packages for use thoughout our analysis. 
+
+* tidyverse-Data processing
+* GGally-Creating scatterplot/correlation features
+* caret-Model contruction
+* MASS-Model Selection
+* pROC-Plotting ROC curve for exponential regression. 
+* stargazer-Making the regression results pretty.  
+* knitr- Making pretty tables in R.
+
 
 ```{r setup, include=FALSE,warning=FALSE, message=FALSE}
 library(tidyverse)
 library(caret)
-library(rmarkdown)
 library(pROC)
-library(GGally)
+library(stargazer)
+library(MASS)
+library(knitr)
 
 news<-read_csv("C:/Users/gswigart/Documents/NCSU/ST 558/Project 2/ST-558-Project-2/Data/OnlineNewsPopularity.csv") 
+
 ```
-Data
-You should briefly describe the data and the variables you have to work with (no need to discuss all of them,
-just the ones you want to use).
-You should randomly sample from (say using sample()) the (Monday) data in order to form a training (70%
-of the data) and test set (30% of the data). You should set the seed to make your work reproducible.
 
 
 ## Partitioning into Test and Training. 
 
-```{r}
+We filter the data for each day so that we are only viewing output pertaining to this day of the week. We choose to classify a shares binary variable that is 0 for shares<1400 and 1 for shares>1400. We then remove the timedelta and url variables because they are not useful predictors. Afterwards we separate %70 of our data for training and use the remaining observations for testing our models accuracy. 
+
+```{r Partition Data}
+params<-list()
+params$day<-'monday'
 news_day <-news %>%
-  filter(weekday_is_monday==1) %>%
+  filter(get(paste0('weekday_is_',params$day))==1) %>%
   mutate(share_binary=as.factor(ifelse(shares<1400,0,1))) %>%
-  select(-starts_with('weekday_is'),
-         -is_weekend,
-         -url,
-         -timedelta)
-  
+  dplyr::select(-starts_with('weekday_is'),
+                -is_weekend,
+                -url,
+                -timedelta)
+
 
 index_train<-unlist(createDataPartition(news_day$share_binary,p=.7))
 training<-news_day[index_train,]
 testing<-news_day[-index_train,]
 ```
 
-# Summarizations
+# Vizualizations and Summary Statistics
 You should produce some basic (but meaningful) summary statistics about the training data you are working
 with. The general things that the plots describe should be explained but, since we are going to automate
-things, there is no need to try and explain particular trends in the plots you see (unless you want to try and
-automate that too!)
+things, there is no need to try and explain particular trends in the plots you see (unless you want to try andautomate that too!)
 
-Lets group these vairables into some useful groups that we can analyze!
+Lets look into the shares variable and look at its distribution. The first histogram appears to be heavily affected by some outliers in the shares variable. So we remove outliers for the second visualization. The classification threshold is also depicted on the graph. The shares variable has a mean around 1000 shares and appears to be skewed right. 
 
-```{r}
-ggplot(data=training,aes(x=shares)) +
-  geom_histogram()
+```{r Shares}
+ggplot(data=training,aes(x=shares))+
+  geom_histogram(bins = 100)+
+  ggtitle('Histogram of Shares of Article')+
+  geom_vline(xintercept=1400)
 
-
-#this was taken from the following stack overflow post 
-#https://stackoverflow.com/questions/30858337/how-to-customize-lines-in-ggpairs-ggally
-lowerFn <- function(data, mapping, method = "lm", ...) {
-  p <- ggplot(data = data, mapping = mapping) +
-    geom_point()+
-    geom_smooth(method="loess",color = "red", ...)+
-    geom_smooth(method='lm', color = "blue", ...)
-  p
-}
-
-
-summary(training$shares)
-quantile(training$shares,.97)
-quantile(training$shares,.98)
-quantile(training$shares,.)
-quantile(training$shares,.97)
-quantile(training$shares,.98)
-quantile(training$shares,.99)
 
 iqr<-IQR(training$shares)
 lower<- quantile(training$shares,.25)-1.5*iqr
@@ -88,237 +100,168 @@ upper<- quantile(training$shares,.75)+1.5*iqr
 training_out_rem<-training %>%
   filter(shares>lower & shares<upper )
 
+ggplot(data=training_out_rem,aes(x=shares)) +
+  geom_histogram(bins = 50)+
+  ggtitle('Histogram of Shares of Article with Outliers Removed')+
+  geom_vline(xintercept=1400)
+```
 
 
-#Metrics about title
+Sharing an article is a two step process. First, the person must click on the article. Some factors that may impact the likeliness of a click are title features, pictures, and the channel type. Lets examine some of the patterns or lack thereof in our data. 
 
+```{r Data Visualizations-Title}
 
-training_out_rem %>%
-  select("n_tokens_title",
-         "title_sentiment_polarity",
-         "abs_title_sentiment_polarity",
-         'shares') %>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+training_out_rem<-training_out_rem %>%
+  mutate(channel=ifelse(data_channel_is_lifestyle==1,'lifestyle',
+                       ifelse(data_channel_is_entertainment==1,'entertainment',
+                       ifelse(data_channel_is_bus==1,'bus',
+                       ifelse(data_channel_is_socmed==1,'socmed',
+                       ifelse(data_channel_is_tech==1,'tech',
+                       ifelse(data_channel_is_world==1,'world','unknown')))))))
 
-
-training_out_rem %>%
-  select("n_tokens_title",
-         "title_subjectivity",
-         "abs_title_subjectivity",
-         'shares') %>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
-  #Looks like we shouldnt use both the title entiment p in the same   plot. Both are piecewise multicolinear and this would lead to incorrect estimates of the parameter standard error. We therefore remove 
-  
-
-#Number of words/nonstop words 
-# Many of these predictors are heavily correlates. We can remove some of these for our regression. 
-training_out_rem %>%
-  select("n_tokens_content",        
-         "n_unique_tokens",            
-         "n_non_stop_words",              
-         "n_non_stop_unique_tokens",
-         "average_token_length",     
-         "num_keywords",
-         'shares') %>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
-
-
-#Number of links, pictures, and images.
-training_out_rem %>%
-  select("num_hrefs",                 
-         "num_self_hrefs",
-         "num_imgs",
-         "num_videos",
-         'shares')%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
-
-#Topic based binary Vairable
+ggplot(training_out_rem,aes(x=title_sentiment_polarity,y=shares,color=title_subjectivity))+
+         facet_wrap(~channel)+
+         geom_jitter()+
+         ggtitle('Title Characteristics by Channel')+
+         xlab('Title Subjectivity')+
+         ylab('Shares')
 
 
 training_out_rem %>%
-  select("data_channel_is_lifestyle", 
-         "data_channel_is_entertainment",
-         "data_channel_is_bus",
-         "data_channel_is_socmed",
-         "data_channel_is_tech",       
-         "data_channel_is_world",
-         'shares')%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+  group_by(channel) %>%
+  summarise('Average Title Sentiment Polarity'=mean(title_sentiment_polarity),
+            'Standard Deviation of Title Sentiment Polarity'=sd(title_sentiment_polarity),
+            'Average Title Subjectivity'=mean(title_subjectivity),
+            'Standard Deviation of Title Subjectivity'=sd(title_subjectivity)) %>%
+  kable()
+```
 
-#Keyword share information
-training_out_rem %>%
-  select("kw_min_min",             
-         "kw_min_avg",
-         "kw_min_max",
-         'shares')%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+Next lets look at sentiment polarity and subjectivity of the whole article. 
 
-training_out_rem %>%
-  select("kw_max_min",
-         "kw_max_max",           
-         "kw_max_avg",
-         'shares')%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
-
-training_out_rem %>%
-  select("kw_avg_min",
-         "kw_avg_avg",          
-         "kw_avg_max",
-         'shares')%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
-
-#minimum shares of referenced articles in mashable. 
-training_out_rem %>%
-  select("self_reference_min_shares",   
-         "self_reference_max_shares",    
-         "self_reference_avg_sharess",
-         'shares')%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
-
-
-
-#LDA variables
-training_out_rem %>%
-  select("LDA_00",
-         "LDA_01",                        
-         "LDA_02",                        
-         "LDA_03",                    
-         "LDA_04",
-         'shares')%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
-
-
-#Sentiment Analysis
-training_out_rem %>%
-  select("global_subjectivity",
-         "global_sentiment_polarity",    
-         "global_rate_positive_words",    
-         "global_rate_negative_words")%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+```{r Data Visualizations-Global}
+ggplot(training_out_rem,aes(x=global_sentiment_polarity,y=shares,color=global_subjectivity))+
+         facet_wrap(~channel)+
+         geom_jitter()+
+         ggtitle('Title Characteristics by Channel')+
+         xlab('Title Subjectivity')+
+         ylab('Shares')
 
 
 training_out_rem %>%
-  select("rate_positive_words"  ,        
-         "rate_negative_words" ,
-         'shares')%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+  group_by(channel) %>%
+  summarise('Average Global Sentiment Polarity'=mean(global_sentiment_polarity),
+            'Standard Deviation of Sentiment Polarity'=sd(global_sentiment_polarity),
+            'Average Global Subjectivity'=mean(global_subjectivity),
+            'Standard Deviation of Global Subjectivity'=sd(global_subjectivity)) %>%
+  kable()
+```
 
-training_out_rem %>%
-  select("avg_positive_polarity",     
-         "min_positive_polarity",
-         "max_positive_polarity",        
-         "avg_negative_polarity",        
-         "min_negative_polarity",       
-         "max_negative_polarity",)%>%
-  ggpairs(lower = list(continuous = wrap(lowerFn, method = "lm")))
+Lastly lets see how the number of shares varies by number of videos and images. We filter the number of videos and images so the distributions are more visible. 
 
-
-
+```{r Data Visualizations-Grpahics}
+ggplot(training_out_rem %>% dplyr::filter(num_videos<5,
+                                          num_imgs<10),aes(x=num_imgs,y=shares,color=num_videos))+
+         geom_jitter()+
+         geom_smooth(method='lm')+
+         ggtitle('Videos by Channel')+
+         xlab('Videos and Graphics vs Shares')+
+         ylab('Shares')
 
 ```
 
-#Modeling
-Once you have your training data set, we are ready to fit some models.
-You should fit two types of models to predict the shares. One model should be an ensemble model (bagged
-trees, random forests, or boosted trees) and one should be a linear regression model (or collection of them that you’ll choose from).
+# Modeling
 
 ## Boosted Tree Model 
 
-I want use a boosted tree model. To accomplish this task I want to try many different types of parameters. I try every combination of the below model parameters. I also use three times repeated 10 fold cross validation so that I have more reliable estimates of the model accuracy.
+We train a boosted tree model below. Repeated 10 fold cross validation was used to select the model parameters below. 
 
-```{r}
+```{r Boosted Tree Model}
+ train.control <- trainControl(method = "repeatedcv",
+                               number = 10,
+                               repeats = 3)
 
-train.control <- trainControl(method = "repeatedcv",
-                              number = 10,
-                              repeats = 3)
+ n.trees<-c(200,300)
+ interaction.depth<-c(3,4)
+ shrinkage<-c(.05)
+ n.minobsinnode<-c(10)
+ param_grid<-data.frame(crossing(n.trees,interaction.depth,shrinkage,n.minobsinnode))
 
-n.trees<-c(200,250)
-interaction.depth<-c(3,4)
-shrinkage<-c(.05)
-n.minobsinnode<-c(8,10)
-param_grid<-data.frame(crossing(n.trees,interaction.depth,shrinkage,n.minobsinnode))
+ boost_fit = train(share_binary ~ .-shares,
+                   data=training,
+                   method="gbm",
+                   trControl=train.control,
+                   distribution="bernoulli",
+                   tuneGrid=param_grid,
+                   verbose=FALSE)
+ 
+ 
+ 
 
-boost_fit = train(share_binary ~ ., 
-                  data=training, 
-                  method="gbm", 
-                  trControl=train.control,
-                  distribution="bernoulli",
-                  tuneGrid=param_grid)
+ print(boost_fit)
+ boost_pred <- predict(boost_fit,newdata = dplyr::select(testing, -share_binary))
+ conf_boost<-confusionMatrix(boost_pred,testing$share_binary)
 
-print(boost_fit)
-boost_pred <- predict(boost_fit,newdata = dplyr::select(testing, -share_binary))
-conf_rf<-confusionMatrix(boost_pred,testing$share_binary)
-print(conf_rf)
+ fourfoldplot(conf_boost$table)
+ 
+ data.frame(Accuracy=conf_boost$overall[1],
+           Prevision=conf_boost$byClass[5],
+           Recall=conf_boost$byClass[6]) %>%
+  kable()
+ 
 ```
 
 ## Regression Model 
 
-```{r}
-glmFit <- glm(share_binary ~ ., data = training, family = "binomial")
-summary(glmFit)
-```
-
 It looks like the LDA is not linearly independent from each other. Lets remove LDA_04 and continue. 
 
 
-```{r}
-#We fit a logistic regression model 
-glmFit <- glm(share_binary ~ . -LDA_04-shares, data = training, family = "binomial") 
+```{r Logistic Regression Fit}
+#We fit a logistic regression model
+glmFit <- glm(share_binary ~ . -LDA_04-shares, data = training, family = "binomial")
+plot(glmFit,which = 4, id.n = 5)
 
-library(MASS)
+glmFit <- glm(share_binary ~ . -LDA_04-shares, data = training %>% filter(!(row_number() %in% c(630)), family = "binomial")
+plot(glmFit)
+summary(glmFit)
+
+
 step.model <- glmFit %>% stepAIC(trace = FALSE)
-coef(step.model)
-
-
-
-
-cooksd <- cooks.distance(glmFit)
-plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
-abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
-text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")
-
-
-
-
-
 
 
 
 summary(glmFit)
-
-
 glm_pred <- predict(step.model,newdata = dplyr::select(testing, -share_binary),type = "response")
-
 roc_obj <- roc(testing$share_binary, glm_pred)
 plot(roc_obj)
 thresh<-coords(roc_obj, "best", "threshold")
-
-confusionMatrix(data = as.factor(as.numeric(glm_pred>thresh$threshold)), reference = testing$share_binary)
-
-
-
 ```
 
 
-The article referenced in the UCI website mentions that they made the problem into a binary classification
-problem by dividing the shares into two groups (< 1400 and ≥ 1400), you can do this if you’d like or simply
-try to predict the shares themselves. Feel free to use code similar to the notes or use the caret package.
-
-After training/tuning your two types of models (linear and non-linear) using cross-validation, AIC, or your
-preferred method (all on the training data set only!) you should then compare them on the test set. Your
-methodology for choosing your model during the training phase should be explained.
-
-```{r}
-
+```{r model comparison, results='asis'}
+stargazer(glmFit,step.model)
 ```
 
 
-Automation
-Once you’ve completed the above for Monday, adapt the code so that you can use a parameter in your build
-process that will cycle through the weekday_is_* variables.
-
-```{r}
-
+```{r Logistic Regression Results}
+conf_exp<-confusionMatrix(data = as.factor(as.numeric(glm_pred>thresh$threshold)), reference = testing$share_binary)
+fourfoldplot(conf_exp$table)
+data.frame(Accuracy=conf_exp$overall[1],
+           Prevision=conf_exp$byClass[5],
+           Recall=conf_exp$byClass[6]) %>%
+  kable()
 ```
 
+# Comparison of Models
 
+```{r comparison of results }
+accuracy<-c(conf_boost$overall[1],conf_exp$overall[1])
+precision<-c(conf_boost$byClass[5],conf_exp$byClass[5])
+recall<-c(conf_boost$byClass[6],conf_exp$byClass[6])
+
+model<-c('Boosted Tree','Exponential Regression')
+data.frame(model,accuracy,precision,recall) %>% kable()
+```
+ 
+ 
+ Hlavac, Marek (2018). stargazer: Well-Formatted Regression and Summary Statistics Tables.
+ R package version 5.2.2. https://CRAN.R-project.org/package=stargaze
