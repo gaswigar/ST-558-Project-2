@@ -1,13 +1,15 @@
 ---
-title: "Project 2"
 author: "Grant Swigart"
 date: "6/22/2020"
 output: 
   html_document:
     toc: TRUE
 
+title: "`r params$day`"
 ---
-  
+
+
+
 ```{r Automating Report,eval = FALSE, echo = FALSE, message = FALSE}
 #This code just automates the report and is run to generate the individual files
 library(rmarkdown)
@@ -27,8 +29,13 @@ apply(reports, MARGIN = 1,
                params = x[[2]])
       })
 
-
 ```
+
+# Introduction 
+
+Welcome to our analysis for `r params$day`. During this article we will be analyzing what makes online news articles popular or unpopular. Luckily all of our data collection has already been completed.
+We will be looking a dataset of [Mashable online news articles](https://archive.ics.uci.edu/ml/datasets/Online+News+Popularity). This dataset has a wide range of valuable info on sentiment analysis, keywords, tokens, and the number of shares of each article. We treat this as a classification problem with more than 1400 shares as popular and less than 1400 shares being unpopular. We use two methods to predict popularity, boosted trees and logistic regression. We then compare these models at the end of the article. 
+
 
 # Setup
 
@@ -40,7 +47,7 @@ We import the following packages for use thoughout our analysis.
 * GGally-Creating scatterplot/correlation features
 * caret-Model contruction
 * MASS-Model Selection
-* pROC-Plotting ROC curve for exponential regression. 
+* pROC-Plotting ROC curve for logistic regression. 
 * stargazer-Making the regression results pretty.  
 * knitr- Making pretty tables in R.
 
@@ -58,9 +65,75 @@ news<-read_csv("C:/Users/gswigart/Documents/NCSU/ST 558/Project 2/ST-558-Project
 ```
 
 
+Given we have a large amount of observations we want to use as many variables as possible. There are 60 different variables in the dataset with the following descriptions taken from [this website](https://archive.ics.uci.edu/ml/datasets/Online+News+Popularity)
+
+
+0. url: URL of the article (non-predictive)
+1. timedelta: Days between the article publication and the dataset acquisition (non-predictive)
+2. n_tokens_title: Number of words in the title
+3. n_tokens_content: Number of words in the content
+4. n_unique_tokens: Rate of unique words in the content
+5. n_non_stop_words: Rate of non-stop words in the content
+6. n_non_stop_unique_tokens: Rate of unique non-stop words in the content
+7. num_hrefs: Number of links
+8. num_self_hrefs: Number of links to other articles published by Mashable
+9. num_imgs: Number of images
+10. num_videos: Number of videos
+11. average_token_length: Average length of the words in the content
+12. num_keywords: Number of keywords in the metadata
+13. data_channel_is_lifestyle: Is data channel 'Lifestyle'?
+14. data_channel_is_entertainment: Is data channel 'Entertainment'?
+15. data_channel_is_bus: Is data channel 'Business'?
+16. data_channel_is_socmed: Is data channel 'Social Media'?
+17. data_channel_is_tech: Is data channel 'Tech'?
+18. data_channel_is_world: Is data channel 'World'?
+19. kw_min_min: Worst keyword (min. shares)
+20. kw_max_min: Worst keyword (max. shares)
+21. kw_avg_min: Worst keyword (avg. shares)
+22. kw_min_max: Best keyword (min. shares)
+23. kw_max_max: Best keyword (max. shares)
+24. kw_avg_max: Best keyword (avg. shares)
+25. kw_min_avg: Avg. keyword (min. shares)
+26. kw_max_avg: Avg. keyword (max. shares)
+27. kw_avg_avg: Avg. keyword (avg. shares)
+28. self_reference_min_shares: Min. shares of referenced articles in Mashable
+29. self_reference_max_shares: Max. shares of referenced articles in Mashable
+30. self_reference_avg_sharess: Avg. shares of referenced articles in Mashable
+31. weekday_is_monday: Was the article published on a Monday?
+32. weekday_is_tuesday: Was the article published on a Tuesday?
+33. weekday_is_wednesday: Was the article published on a Wednesday?
+34. weekday_is_thursday: Was the article published on a Thursday?
+35. weekday_is_friday: Was the article published on a Friday?
+36. weekday_is_saturday: Was the article published on a Saturday?
+37. weekday_is_sunday: Was the article published on a Sunday?
+38. is_weekend: Was the article published on the weekend?
+39. LDA_00: Closeness to LDA topic 0
+40. LDA_01: Closeness to LDA topic 1
+41. LDA_02: Closeness to LDA topic 2
+42. LDA_03: Closeness to LDA topic 3
+43. LDA_04: Closeness to LDA topic 4
+44. global_subjectivity: Text subjectivity
+45. global_sentiment_polarity: Text sentiment polarity
+46. global_rate_positive_words: Rate of positive words in the content
+47. global_rate_negative_words: Rate of negative words in the content
+48. rate_positive_words: Rate of positive words among non-neutral tokens
+49. rate_negative_words: Rate of negative words among non-neutral tokens
+50. avg_positive_polarity: Avg. polarity of positive words
+51. min_positive_polarity: Min. polarity of positive words
+52. max_positive_polarity: Max. polarity of positive words
+53. avg_negative_polarity: Avg. polarity of negative words
+54. min_negative_polarity: Min. polarity of negative words
+55. max_negative_polarity: Max. polarity of negative words
+56. title_subjectivity: Title subjectivity
+57. title_sentiment_polarity: Title polarity
+58. abs_title_subjectivity: Absolute subjectivity level
+59. abs_title_sentiment_polarity: Absolute polarity level
+60. shares: Number of shares (target)
+
+
 ## Partitioning into Test and Training. 
 
-We filter the data for each day so that we are only viewing output pertaining to this day of the week. We choose to classify a shares binary variable that is 0 for shares<1400 and 1 for shares>1400. We then remove the timedelta and url variables because they are not useful predictors. Afterwards we separate %70 of our data for training and use the remaining observations for testing our models accuracy. 
+We filter the data for each day so that we are only viewing output pertaining to this day of the week. We choose to classify a shares binary variable that is 0 for shares<1400 and 1 for shares>1400. We then remove the timedelta and url variables because they are not useful predictors. Afterwards we separate %70 of our data for training and use the remaining observations for testing our models accuracy. We also set our seed so that our results are reproducible. 
 
 ```{r Partition Data}
 params<-list()
@@ -73,20 +146,19 @@ news_day <-news %>%
                 -url,
                 -timedelta)
 
-
+set.seed(628)
 index_train<-unlist(createDataPartition(news_day$share_binary,p=.7))
 training<-news_day[index_train,]
 testing<-news_day[-index_train,]
 ```
 
 # Vizualizations and Summary Statistics
-You should produce some basic (but meaningful) summary statistics about the training data you are working
-with. The general things that the plots describe should be explained but, since we are going to automate
-things, there is no need to try and explain particular trends in the plots you see (unless you want to try andautomate that too!)
+
+## Shares 
 
 Lets look into the shares variable and look at its distribution. The first histogram appears to be heavily affected by some outliers in the shares variable. So we remove outliers for the second visualization. The classification threshold is also depicted on the graph. The shares variable has a mean around 1000 shares and appears to be skewed right. 
 
-```{r Shares}
+```{r Shares,message=FALSE}
 ggplot(data=training,aes(x=shares))+
   geom_histogram(bins = 100)+
   ggtitle('Histogram of Shares of Article')+
@@ -107,9 +179,11 @@ ggplot(data=training_out_rem,aes(x=shares)) +
 ```
 
 
-Sharing an article is a two step process. First, the person must click on the article. Some factors that may impact the likeliness of a click are title features, pictures, and the channel type. Lets examine some of the patterns or lack thereof in our data. 
+## Title Characteristics
 
-```{r Data Visualizations-Title}
+Sharing an article is a two step process. First, the person must click on the article. Some factors that may impact the likeliness of a click are title features, pictures, and the channel type. Lets examine some of the patterns or lack thereof in our data. We make graphs of the title sentiment polarity and subjectivity for various channels against the total shares variables. We also add a line to depict the threshold for popularity. We also find the mean and standard deviation for these variables and include them in the table below. 
+
+```{r Data Visualizations-Title,message=FALSE}
 
 training_out_rem<-training_out_rem %>%
   mutate(channel=ifelse(data_channel_is_lifestyle==1,'lifestyle',
@@ -124,32 +198,40 @@ ggplot(training_out_rem,aes(x=title_sentiment_polarity,y=shares,color=title_subj
          geom_jitter()+
          ggtitle('Title Characteristics by Channel')+
          xlab('Title Subjectivity')+
-         ylab('Shares')
+         ylab('Shares')+
+         geom_hline(yintercept = 1400)
 
 
 training_out_rem %>%
   group_by(channel) %>%
-  summarise('Average Title Sentiment Polarity'=mean(title_sentiment_polarity),
+  summarise('Mean Number of Shares'=mean(shares),
+            'Number of Articles'=n(),
+            'Average Title Sentiment Polarity'=mean(title_sentiment_polarity),
             'Standard Deviation of Title Sentiment Polarity'=sd(title_sentiment_polarity),
             'Average Title Subjectivity'=mean(title_subjectivity),
             'Standard Deviation of Title Subjectivity'=sd(title_subjectivity)) %>%
   kable()
 ```
 
-Next lets look at sentiment polarity and subjectivity of the whole article. 
+## Global Characteristics 
 
-```{r Data Visualizations-Global}
+Next lets look at sentiment polarity and subjectivity of the whole article. We create the same graphs and summary statistics as above but use the measures for entire text. 
+
+```{r Data Visualizations-Global,message=FALSE}
 ggplot(training_out_rem,aes(x=global_sentiment_polarity,y=shares,color=global_subjectivity))+
          facet_wrap(~channel)+
          geom_jitter()+
          ggtitle('Title Characteristics by Channel')+
          xlab('Title Subjectivity')+
-         ylab('Shares')
+         ylab('Shares')+
+  geom_hline(yintercept = 1400)
 
 
 training_out_rem %>%
   group_by(channel) %>%
-  summarise('Average Global Sentiment Polarity'=mean(global_sentiment_polarity),
+  summarise('Mean Number of Shares'=mean(shares),
+            'Number of Articles'=n(),
+            'Average Global Sentiment Polarity'=mean(global_sentiment_polarity),
             'Standard Deviation of Sentiment Polarity'=sd(global_sentiment_polarity),
             'Average Global Subjectivity'=mean(global_subjectivity),
             'Standard Deviation of Global Subjectivity'=sd(global_subjectivity)) %>%
@@ -158,7 +240,7 @@ training_out_rem %>%
 
 Lastly lets see how the number of shares varies by number of videos and images. We filter the number of videos and images so the distributions are more visible. 
 
-```{r Data Visualizations-Grpahics}
+```{r Data Visualizations-Grpahics,message=FALSE}
 ggplot(training_out_rem %>% dplyr::filter(num_videos<5,
                                           num_imgs<10),aes(x=num_imgs,y=shares,color=num_videos))+
          geom_jitter()+
@@ -176,7 +258,7 @@ ggplot(training_out_rem %>% dplyr::filter(num_videos<5,
 We train a boosted tree model below. Repeated 10 fold cross validation was used to select the model parameters below. 
 
 ```{r Boosted Tree Model}
- train.control <- trainControl(method = "repeatedcv",
+train.control <- trainControl(method = "repeatedcv",
                                number = 10,
                                repeats = 3)
 
@@ -195,15 +277,16 @@ We train a boosted tree model below. Repeated 10 fold cross validation was used 
                    verbose=FALSE)
  
  
- 
+boost_fit$results %>% kable()
+boost_pred <- predict(boost_fit,newdata = dplyr::select(testing, -share_binary))
+conf_boost<-confusionMatrix(boost_pred,testing$share_binary)
+```
 
- print(boost_fit)
- boost_pred <- predict(boost_fit,newdata = dplyr::select(testing, -share_binary))
- conf_boost<-confusionMatrix(boost_pred,testing$share_binary)
+We select the boosted model with the highest accuracy hoping that this will translate to a high accuracy on our testing dataset. Lets make a plot of the confusion matrix and look at the accuracy, precision, and recall. 
 
- fourfoldplot(conf_boost$table)
- 
- data.frame(Accuracy=conf_boost$overall[1],
+```{r Boosted Tree Model-Fit}
+fourfoldplot(conf_boost$table)
+data.frame(Accuracy=conf_boost$overall[1],
            Prevision=conf_boost$byClass[5],
            Recall=conf_boost$byClass[6]) %>%
   kable()
@@ -212,56 +295,69 @@ We train a boosted tree model below. Repeated 10 fold cross validation was used 
 
 ## Regression Model 
 
-It looks like the LDA is not linearly independent from each other. Lets remove LDA_04 and continue. 
-
+It looks like the LDA is not linearly independent from each other. Lets remove LDA_04 and continue. We remove high leverage points by removing all points that have a cooks distance greater than 4/(sample size).
 
 ```{r Logistic Regression Fit}
 #We fit a logistic regression model
 glmFit <- glm(share_binary ~ . -LDA_04-shares, data = training, family = "binomial")
 plot(glmFit,which = 4, id.n = 5)
+cooksd <- cooks.distance(glmFit)
+sample_size <- nrow(training)
+influential <- as.numeric(names(cooksd)[(cooksd > (4/sample_size))])
+training_no_lev<-training  %>%
+  filter(!row_number() %in% influential)
+```
 
-glmFit <- glm(share_binary ~ . -LDA_04-shares, data = training %>% filter(!(row_number() %in% c(630)), family = "binomial")
-plot(glmFit)
-summary(glmFit)
+Now we do backward model selection using the lowest AIC. Mimizing AIC helps us to come up with a parsimonious model that still fits the data well. 
 
+```{r Logistic Model Selection,warning=FALSE,message=FALSE}
+glmFit <- glm(share_binary ~ . -LDA_04-shares, 
+              data = training_no_lev,
+              family = "binomial")
 
 step.model <- glmFit %>% stepAIC(trace = FALSE)
+```
 
+We then use the ROC curve to find the Youden point which maximizes sensitivity+specificity. This allows us to classify the values returned from our logistic regression into popular and unpopular. 
 
-
-summary(glmFit)
-glm_pred <- predict(step.model,newdata = dplyr::select(testing, -share_binary),type = "response")
-roc_obj <- roc(testing$share_binary, glm_pred)
+```{r Logistic Regression Threshold,warning=FALSE,message=FALSE}
+roc_obj <- roc(training_no_lev$share_binary, glmFit$fitted.values)
+thresh<-coords(roc_obj, "best", "threshold",transpose=FALSE)
 plot(roc_obj)
-thresh<-coords(roc_obj, "best", "threshold")
 ```
 
+Lets look at the estimates of our regression. We see many variables that are statistically significant. 
 
-```{r model comparison, results='asis'}
-stargazer(glmFit,step.model)
+```{r model comparison}
+summary(step.model)
 ```
 
+Lets test the fit of our final model against our testing dataset. 
 
 ```{r Logistic Regression Results}
-conf_exp<-confusionMatrix(data = as.factor(as.numeric(glm_pred>thresh$threshold)), reference = testing$share_binary)
+test_pred <- predict(step.model,
+                    newdata = dplyr::select(testing, -share_binary),
+                    type = "response")
+
+conf_exp<-confusionMatrix(data = as.factor(as.numeric(test_pred>thresh$threshold)), reference = testing$share_binary)
+
 fourfoldplot(conf_exp$table)
 data.frame(Accuracy=conf_exp$overall[1],
-           Prevision=conf_exp$byClass[5],
+           PreCision=conf_exp$byClass[5],
            Recall=conf_exp$byClass[6]) %>%
   kable()
 ```
 
 # Comparison of Models
 
-```{r comparison of results }
-accuracy<-c(conf_boost$overall[1],conf_exp$overall[1])
-precision<-c(conf_boost$byClass[5],conf_exp$byClass[5])
-recall<-c(conf_boost$byClass[6],conf_exp$byClass[6])
+Lets see how the boosted tree compares to the logistic regression model. Both of the models are fit the data about as well as the other. The models dont appear to be overfitted or underfitted because
 
-model<-c('Boosted Tree','Exponential Regression')
-data.frame(model,accuracy,precision,recall) %>% kable()
+```{r comparison of results }
+Accuracy<-c(conf_boost$overall[1],conf_exp$overall[1])
+Precision<-c(conf_boost$byClass[5],conf_exp$byClass[5])
+Recall<-c(conf_boost$byClass[6],conf_exp$byClass[6])
+
+model<-c('Boosted Tree','Logistic Regression')
+data.frame(model,Accuracy,Precision,Recall) %>% kable()
 ```
  
- 
- Hlavac, Marek (2018). stargazer: Well-Formatted Regression and Summary Statistics Tables.
- R package version 5.2.2. https://CRAN.R-project.org/package=stargaze
