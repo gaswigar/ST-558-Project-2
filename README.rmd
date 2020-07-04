@@ -1,10 +1,7 @@
 ---
 author: "Grant Swigart"
 date: "6/22/2020"
-output: 
-  html_document:
-    toc: TRUE
-
+output: rmarkdown::github_document
 title: "`r params$day`"
 ---
 
